@@ -1,0 +1,690 @@
+---
+title: "MERS_Review"
+output:
+  html_document:
+    df_print: paged
+date: "2023-01-25"
+---
+
+```{r, include=F}
+
+# Import packages
+library(pacman)
+p_load(tidyverse)
+p_load(openxlsx)
+p_load(spData)
+p_load(maps)
+p_load(maptools)
+p_load(rworldmap)
+p_load(sf)
+p_load(ggsn)
+p_load(janitor)
+p_load(esc)
+p_load(meta)
+p_load(metafor)
+```
+
+
+```{r}
+camel_data <- openxlsx::read.xlsx("FAOSAT_camel_data.xlsx") %>%
+  clean_names() %>%
+  filter(year_code==2021) %>%
+  select(area, value)
+```
+
+```{r, include=F}
+
+## Import data
+
+data <- read.xlsx("MERS-Review Extraction tool_2024.xlsx", "Master") %>%
+  clean_names() %>%
+  #filter(!is.na(code)) %>%
+  filter(!species%in%c("Domestic livestock", "bats"))
+```
+
+```{r echo=FALSE}
+
+## countries
+
+countries_dromedaries <- data %>%
+  filter(species%in%"Dromedaries") %>%
+  select(id, country) %>%
+  distinct(id, .keep_all = TRUE) %>%
+  mutate(country=trimws(country), # trim white space
+         country=recode(country, "Bukina Faso"= "Burkina Faso"))%>%  # recode the country names
+  group_by(country) %>%
+  count() %>%
+  filter(!is.na(country)) %>%
+  mutate(names=country) %>%
+  ungroup() %>%
+  mutate(prop=n/sum(n)*100)
+
+
+country_dromedaries<- world %>%
+  filter(region_un%in%"Africa") %>%
+  left_join(countries_dromedaries, by=c("name_long"="country")) %>%
+  mutate(species="Dromedaries") %>%
+  left_join(camel_data, by=c("name_long"="area"))
+
+## human data
+countries_human <- data %>%
+  filter(species%in%"Humans") %>%
+  select(id, country) %>%
+  distinct(id, .keep_all = TRUE) %>%
+  mutate(country=trimws(country), # trim white space
+         country=recode(country, "Bukina Faso"= "Burkina Faso"))%>%  # recode the country names
+  group_by(country) %>%
+  count() %>%
+  filter(!is.na(country)) %>%
+  mutate(names=country) %>%
+  ungroup() %>%
+  mutate(prop=n/sum(n)*100)
+  
+country_human<- world %>%
+  filter(region_un%in%"Africa") %>%
+  left_join(countries_human, by=c("name_long"="country"))%>%
+  mutate(species="Human")%>%
+  left_join(camel_data, by=c("name_long"="area"))
+
+## join all the data
+
+country_data <- rbind(country_dromedaries, country_human) %>%
+  mutate(centroid=st_centroid(geom)) %>%
+  separate(centroid, c("latitude", "longitude"), sep=" ")%>%
+  mutate_at(vars(latitude, longitude), funs(str_remove(.,"c"))) %>%
+  mutate_at(vars(latitude, longitude), funs(str_remove(.,"[(,)]"))) %>%
+  mutate_at(vars(latitude, longitude), funs(str_remove(.,"[,]"))) %>%
+  mutate_at(vars(latitude, longitude),funs(as.numeric(.))) %>%
+  mutate(latitude=ifelse(is.na(n), NA, latitude)) %>%
+   mutate(longitude=ifelse(is.na(n), NA, longitude))
+  
+
+
+# visualize Africa Map review
+ggplot(country_data)+geom_sf(aes(fill=value))+theme_bw()+
+  scale_fill_gradient(low="#ffeda0", high="#bd0026", na.value = "white")+geom_point(aes(x=latitude, y=longitude, size=n), color="black")+
+  scale_size(range=c(2,10), name="Number of studies", labels=seq(3,15, by=3), breaks=seq(3,15, by=3))+
+  facet_grid(.~species)+
+  #geom_text(aes(x=latitude, y=longitude, label=n),color="white", size=6)+
+  labs(x="Latitude", y="Longitude", fill="Camel population", caption="*One paper studied Africa as a whole and have not been included in this figure")+
+  theme(axis.title = element_text(face="bold", size=24), legend.text = element_text(size = 19), strip.text = element_text(face="bold", size = 21), axis.text = element_text(size = 20), legend.title = element_text(size = 18), plot.caption = element_text(size = 14))+
+  ggsn::north(country_data)+ggsn::scalebar(country_data, dist=1000, dist_unit="km",transform = T, location="bottomleft")
+ggsave("figures/Figure1_number of studies.png", width=19, height=11)
+
+#visualize Africa Map review style 2
+ggplot(country_data) +
+  geom_sf(aes(fill = value)) +
+  theme_bw() +
+  scale_fill_gradient(low = "#ffeda0", high = "#bd0026", na.value = "white", labels = scales::comma) +
+  geom_point(aes(x = latitude, y = longitude, size = n), color = "black") +
+  geom_text(aes(x = latitude, y = longitude, label = n), hjust = 1.5, vjust = 1.5, color = "black", size = 6) +
+  scale_size(range=c(2,10), name="Number of studies", labels=seq(3,15, by=3), breaks=seq(3,15, by=3))+
+  facet_grid(. ~ species) +
+  labs(x = "Latitude", y = "Longitude", fill = "Camel population", caption = "*One paper studied Africa as a whole and has not been included in this figure") +
+  theme(axis.title = element_text(face = "bold", size = 24), legend.text = element_text(size = 19), strip.text = element_text(face = "bold", size = 21), axis.text = element_text(size = 20), legend.title = element_text(size = 18), plot.caption = element_text(size = 14), text = element_text(family = "Arial")) +
+  ggsn::north(country_data) +
+  ggsn::scalebar(country_data, dist = 1000, dist_unit = "km", transform = T, location = "bottomleft")
+
+ggsave("figures/Figure1_number_of_studies_edited.png", width = 19, height = 11)
+
+
+
+# temporal visualization
+region_dromedaries <- data %>%
+  filter(species%in%"Dromedaries") %>%
+  mutate(region=ifelse(country%in%c("Burkina Faso", "Mali", "Nigeria", "Senegal"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) %>%
+  select(id, region, publication_year) %>%
+  distinct(id, .keep_all = TRUE) %>%
+  group_by(region,publication_year) %>%
+  count() %>%
+  filter(!is.na(region)) %>%
+  mutate(names=region) %>%
+  ungroup() %>%
+  arrange(publication_year) %>%
+  group_by(region) %>%
+  mutate(cumulative=cumsum(n)) %>%
+  ungroup()%>%
+  mutate(species="Dromedaries")
+
+
+
+region_human <- data %>%
+  filter(species%in%"Humans") %>%
+  mutate(region=ifelse(country%in%c("Ghana", "Sierra Leone", "Nigeria"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) %>%
+  select(id, region, publication_year) %>%
+  distinct(id, .keep_all = TRUE) %>%
+  group_by(region,publication_year) %>%
+  count() %>%
+  filter(!is.na(region)) %>%
+  mutate(names=region) %>%
+  ungroup() %>%
+  arrange(publication_year) %>%
+  group_by(region) %>%
+  mutate(cumulative=cumsum(n)) %>%
+  ungroup() %>%
+  mutate(species="Humans")
+
+region_data <- rbind(region_human, region_dromedaries) 
+
+region_data$region <- fct_relevel(region_data$region, "West Africa", "North Africa", "East Africa")
+
+ggplot(region_data, aes(x=publication_year, y=n, fill=region))+geom_col()+facet_grid(species~.)+
+  theme_bw()+scale_fill_brewer(palette="Set1")+labs(x="Year of publication", y="Number of papers", fill="Region")+
+  theme(text=element_text(size=16, face="bold"))
+
+ggsave("Number of papers papers.png", width=14, height=8)
+
+```
+
+```{r echo=FALSE}
+
+seroprevalence <- data %>%
+  select(id, author, country, publication_year, species,sample_size_1, seroprevalence_pcr_percent, sample_size_2, seroprevalence_serology_elisa) %>%
+   mutate(region=ifelse(country%in%c("Burkina Faso","Ghana", "Sierra Leone", "Mali", "Nigeria", "Senegal"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) %>%
+  mutate_at(vars(contains("seroprevalence")), funs(round(.,1))) %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(author1=paste0(authname2, " et al, ", publication_year)) %>%
+  filter(species%in%c("Dromedaries", "Humans"))
+
+seroprevalence_dromedaries <- seroprevalence %>%
+  filter(species%in%"Dromedaries") %>%
+  mutate(remove=ifelse(is.na(seroprevalence_serology_elisa) &is.na(seroprevalence_pcr_percent), "Yes", "No")) %>%
+  filter(remove%in%"No")%>%
+  select(-remove)%>%
+  pivot_longer(contains("seroprevalence"), names_to="Test", values_to="seroprevalence") %>%
+  pivot_longer(contains("sample_size"), names_to="sample_test", values_to = "sample_size") %>%
+  mutate(Test=recode(Test, "seroprevalence_pcr_percent"="PCR positives", "seroprevalence_serology_elisa"="Seroprevalence")) %>%
+  mutate(sample_test=recode(sample_test, "sample_size_1"="PCR", "sample_size_2"="ELISA")) %>%
+  mutate(seroprevalence1=ifelse(Test%in%"PCR positives", seroprevalence*-1, seroprevalence))
+
+## relevel
+seroprevalence_dromedaries$region <- fct_relevel(seroprevalence_dromedaries$region, "West Africa", "North Africa", "East Africa")
+
+ggplot(seroprevalence_dromedaries, aes(x=abs(seroprevalence1), y=reorder(author1,publication_year), size=sample_size, group=author1, color=region))+geom_point()+scale_size(range=c(2,15), name="Sample size")+facet_wrap(.~Test, scale="free_x")+
+  theme_bw()+scale_color_brewer(palette="Set1")+labs(x="Prevalence", y="", color="Region") +
+  theme(text=element_text(size=16))
+
+
+ggsave("figures/prevalence_dromedaries1.png", width=14, height=9)
+
+ggplot(seroprevalence_dromedaries, aes(x=seroprevalence1, y=reorder(author1,publication_year), size=sample_size, group=author1, color=region))+geom_point()+scale_size(range=c(2,15), name="Sample size")+facet_wrap(.~Test)+
+  theme_bw()+scale_color_brewer(palette="Set1")+labs(x="Prevalence", y="", color="Region") +
+  theme(text=element_text(size=16))
+
+ggsave("figures/prevalence_dromedaries.png", width=14, height=9)
+
+
+
+## human species
+
+seroprevalence_humans <- seroprevalence %>%
+  filter(!author1%in%"Abroug et al, 2014") %>%
+  filter(species%in%"Humans") %>%
+  mutate(remove=ifelse(is.na(seroprevalence_serology_elisa) &is.na(seroprevalence_pcr_percent), "Yes", "No")) %>%
+  filter(remove%in%"No")%>%
+  select(-remove)%>%
+  pivot_longer(contains("seroprevalence"), names_to="Test", values_to="seroprevalence") %>%
+  pivot_longer(contains("sample_size"), names_to="sample_test", values_to = "sample_size") %>%
+  mutate(Test=recode(Test, "seroprevalence_pcr_percent"="PCR positives", "seroprevalence_serology_elisa"="Seroprevalence")) %>%
+  mutate(sample_test=recode(sample_test, "sample_size_1"="PCR", "sample_size_2"="ELISA")) %>%
+  mutate(seroprevalence1=ifelse(Test%in%"PCR positives", seroprevalence*-1, seroprevalence))
+
+seroprevalence_humans$region <- fct_relevel(seroprevalence_humans$region, "West Africa", "North Africa", "East Africa")
+ggplot(seroprevalence_humans, aes(x=abs(seroprevalence1), y=reorder(author1,publication_year), size=sample_size, group=author1, color=region))+geom_point()+scale_size(range=c(2,15), name="Sample size")+facet_wrap(.~Test, scales = "free_x")+
+  theme_bw()+scale_color_brewer(palette="Set1")+labs(x="Prevalence", y="", color="Region") +
+  theme(text=element_text(size=16))
+
+
+
+ggsave("figures/prevalence_humans1.png", width=14, height=9)
+
+
+# seroprevalence over time
+
+seroprevalence_time <- data %>%
+  select(id, author, publication_year, study_end, dromedaries_age, species,sample_size_1, seroprevalence_pcr_percent, sample_size_2, seroprevalence_serology_elisa) %>%
+  mutate_at(vars(contains("seroprevalence")), funs(round(.,1))) %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(author1=paste0(authname2, " et al, ", publication_year)) %>%
+  filter(species%in%c("Dromedaries", "Humans"))%>%
+  pivot_longer(contains("seroprevalence"), names_to="Test", values_to="seroprevalence") %>%
+  pivot_longer(contains("sample_size"), names_to="sample_test", values_to = "sample_size") %>%
+  mutate(Test=recode(Test, "seroprevalence_pcr_percent"="PCR positives", "seroprevalence_serology_elisa"="Seroprevalence")) %>%
+  mutate(sample_test=recode(sample_test, "sample_size_1"="PCR", "sample_size_2"="ELISA")) %>%
+  mutate(species1=ifelse(species%in%"Dromedaries" & dromedaries_age%in%c("Adults", "adults"),"Dromedaries (Adults)", ifelse(species%in%"Dromedaries" & dromedaries_age%in%"Juveniles", "Dromedaries (Juveniles)", ifelse(species%in%"Dromedaries" &is.na(dromedaries_age), "Dromedaries (Age undefined)", species))))
+  
+seroprevalence_time$species1 <- fct_relevel(seroprevalence_time$species1, "Dromedaries (Adults)", "Dromedaries (Juveniles)")
+ggplot(seroprevalence_time, aes(x=study_end, y=seroprevalence, color=Test))+
+  geom_point(size=2.5)+facet_wrap(species1~.)+scale_color_manual(values=c("#e41a1c", "#377eb8", "#4daf4a", "#ff7f00"))+
+  theme(axis.title = element_text(face="bold", size=24), legend.text = element_text(size = 19), strip.text = element_text(face="bold", size = 21), axis.text = element_text(size = 20), legend.title = element_text(size = 18), plot.caption = element_text(size = 14), panel.grid.major = element_line(color = "grey", size = 0.5))+ 
+  labs(x="Year of data collection", y="Prevalence", color="Species", caption="Dashed line represents the year the first human MERS-CoV case was reported")+theme(text=element_text(size=16))+scale_x_continuous(breaks=seq(1980,2025, by=5))+
+  geom_vline(xintercept = 2012, linetype=2)
+
+ggsave("figures/prevalence_over_time.png", width=18, height=11, dpi=300)
+```
+
+
+```{r, include=F, forest_plots}
+
+# Set the font to Arial
+par(family = "Arial")
+
+
+#Forest plot overall dromedary seroprevalence
+
+forest_plot_dromedaries <- data %>%
+  select(id, species,author, publication_year,study_end, sample_size_sero, samples_positive_sero) %>%
+  filter(species%in%"Dromedaries") %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(study_end1=ifelse(is.na(study_end), "Not reported", study_end)) %>%
+  mutate(author1=paste0(authname2, " et al, ",publication_year, " (", study_end1, ")"))  %>%
+  filter(!is.na(sample_size_sero)) %>%
+  filter(!is.na( samples_positive_sero))%>%
+  arrange(publication_year)
+
+
+mt_prop <- metaprop(
+  event=samples_positive_sero,
+  n= sample_size_sero,
+  studlab=author1,
+  data=forest_plot_dromedaries,
+  pscale=100)
+
+
+png(file="figures/foresplot_dromedaries_overall_sero.png", width=12, height=14, units="in", res=600)
+metafor::forest(mt_prop, rightlabs=c("Seroprevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year sample collected)", "Positive (n)", "Sample size"))
+dev.off()
+
+##Forest plot overall dromedary seroprevalence with country and age labels
+forest_plot_dromedaries <- data %>%
+  select(id, species, author, publication_year, study_end, sample_size_sero, samples_positive_sero, country, dromedaries_age) %>%
+  filter(species %in% "Dromedaries") %>%
+  separate(author, c("authname1", "authname2"), extra = "merge") %>%
+  mutate(authname2 = recode(authname2, "El" = "El-Kafraway"),
+         study_end1 = ifelse(is.na(study_end), "Not reported", study_end),
+         dromedaries_age = ifelse(is.na(dromedaries_age) | dromedaries_age == "", "age_undefined", dromedaries_age),
+         author1 = paste0(authname2, " et al, ", publication_year, " (", study_end1, ")", ", ", country, ", ", dromedaries_age)) %>%
+  filter(!is.na(sample_size_sero)) %>%
+  filter(!is.na(samples_positive_sero)) %>%
+  arrange(publication_year)
+
+mt_prop <- metaprop(
+  event = samples_positive_sero,
+  n = sample_size_sero,
+  studlab = author1, # Updated to use the new label column
+  data = forest_plot_dromedaries,
+  pscale = 100
+)
+
+
+png(file="figures/foresplot_dromedaries_overall2_sero.png", width=12, height=14, units="in", res=600)
+metafor::forest(mt_prop, rightlabs=c("Seroprevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year sample collected, Country, Age)", "Positive (n)", "Sample size"))
+
+
+
+# Create the funnel plot for seroprevalence dromedaries
+
+png(file="figures/funnel_plot_dromedaries_overall.png", width=14, height=12, units="in", res=300)
+funnel(mt_prop, 
+       xlab = "Proportion", 
+       main = "Funnel Plot of Seroprevalence in Dromedaries")
+
+dev.off()
+
+
+## Dromedary subgroup analysis
+forest_plot_dromedaries1 <- data %>%
+  select(id, species,author,country, dromedaries_age, publication_year,study_end, sample_size_sero, samples_positive_sero) %>%
+  filter(species%in%"Dromedaries") %>%
+  mutate(group=ifelse(species%in%"Dromedaries" & dromedaries_age%in%c("Adults", "adults"),"Dromedaries (Adults)", ifelse(species%in%"Dromedaries" & dromedaries_age%in%"Juveniles", "Dromedaries (Juveniles)", ifelse(species%in%"Dromedaries" &is.na(dromedaries_age), "Dromedaries (Age undefined)", species)))) %>%
+  mutate(region=ifelse(country%in%c("Burkina Faso","Ghana", "Sierra Leone", "Mali", "Nigeria", "Senegal"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(study_end1=ifelse(is.na(study_end), "Not reported", study_end)) %>%
+   mutate(author1=paste0(authname2, " et al, ",publication_year, " (", study_end1, ")"))  %>%
+  filter(!is.na(sample_size_sero)) %>%
+  filter(!is.na( samples_positive_sero))%>%
+  mutate(official_year=study_end-2012) %>%
+  arrange(publication_year)
+
+forest_plot_dromedaries1$group <- fct_relevel(forest_plot_dromedaries1$group, "Dromedaries (Adults)", "Dromedaries (Juveniles)", "Dromedaries (Age undefined)")
+
+## seroprevalence - age of dromedaries subgroup analysis
+mt_prop_group <- metaprop(
+  event=samples_positive_sero,
+  n= sample_size_sero,
+  studlab=author1,
+  subgroup=group,
+  data=forest_plot_dromedaries1,
+  pscale=100)
+
+
+
+png(file="figures/foresplot_dromedaries_subgroup_seroprevalence.png", width=14, height=14, units="in", res=300)
+metafor::forest(mt_prop_group, rightlabs=c("Seroprevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size"), col.by = "black",smlab="", subgroup.name = "" )
+
+dev.off()
+
+## Subgroup Analysis for Age Categories
+mt_prop_group <- metaprop(
+  event=samples_positive_sero,
+  n=sample_size_sero,
+  studlab=author1,
+  subgroup=group,  # Subgroup by age group
+  data=forest_plot_dromedaries1,
+  pscale=100)
+
+## Generate Forest Plot with Sub-categories for Age Groups
+png(file="figures/forestplot_dromedaries_subgroup_jordi.png", width=14, height=14, units="in", res=300)
+metafor::forest(
+  mt_prop_group,
+  rightlabs=c("Seroprevalence (%)", "[95% CI]"),   # Labels for the right-hand side of the plot
+  leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size"),  # Labels for the left-hand side
+  col.by="black",     # Color of subgroup heading
+  smlab="",           # No summary label for the plot
+  subgroup.name="Dromedary Age Groups"  # Name of the subgroup
+)
+
+dev.off()
+
+
+## region subgroup analysis - 
+mt_prop_region <- metaprop(
+  event=samples_positive_sero,
+  n= sample_size_sero,
+  studlab=author1,
+  subgroup=region,
+  data=forest_plot_dromedaries1,
+  pscale=100)
+
+
+png(file="figures/foresplot_dromedaries_region.png", width=14, height=14, units="in", res=300)
+metafor::forest(mt_prop_region, rightlabs=c("Seroprevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size"), col.by = "black",smlab="", subgroup.name = "" )
+
+dev.off()
+
+## Combine Region and Age Group for Subgroup Analysis while keeping the region as the main group
+forest_plot_dromedaries1 <- forest_plot_dromedaries1 %>%
+  mutate(region_age_group = paste(region, group, sep = " - ")) %>%  # Combine region and age group
+  mutate(group = fct_relevel(group, "Dromedaries (Adults)", "Dromedaries (Juveniles)", "Dromedaries (Age undefined)")) %>%
+  arrange(region, group)  # Arrange the data by region and group
+
+## Meta-analysis with Region and Age as Subcategories
+mt_prop_region_age <- metaprop(
+  event = samples_positive_sero,
+  n = sample_size_sero,
+  studlab = author1,
+  subgroup = region_age_group,  # Use combined region and age group
+  data = forest_plot_dromedaries1,
+  pscale = 100
+)
+
+## Dynamically calculate plot height based on the number of studies
+num_studies <- nrow(forest_plot_dromedaries1)
+plot_height <- 20 + num_studies * 0.2  # Adjust the plot height dynamically
+
+## Generate Forest Plot with Region as the main group and Age as subcategories
+png(file = "figures/forestplot_dromedaries_region_age1.png", width = 18, height = plot_height, units = "in", res = 300)  # Dynamically adjust height
+par(mar = c(5, 5, 5, 5))  # Adjust margins for better spacing
+metafor::forest(
+  mt_prop_region_age,
+  rightlabs = c("Seroprevalence (%)", "[95% CI]"),  # Labels for the right-hand side
+  leftlabs = c("Study (Year data collected)", "Positive (n)", "Sample size"),  # Labels for the left-hand side
+  col.by = "black",  # Color of subgroup heading
+  smlab = "",  # No summary label for the plot
+  subgroup.name = "Region and Age Group",  # Combined group for region and age
+  ilab.pos = 4,  # Adjust position of the labels
+  refline = 0.5,  # Adjust the reference line position
+  cex = 1.2,  # Increase text size for better readability
+  spacing = 1.5  # Add extra spacing between lines
+)
+dev.off()
+
+
+
+
+
+
+forest_plot_dromedaries2 <- forest_plot_dromedaries1 %>%
+  filter(!is.na(official_year)) %>%
+  mutate(official_year1=ifelse(official_year==c(-15, -28, -29), ">5 years before official case", ifelse(official_year==c(-1, -2), "1-5 years before official case", ifelse(official_year==c(1,2,4,5), "1-5 years after official case", ">5 years after official case")))) %>%
+  mutate(group1=paste0(group, " (", official_year1, ")"))
+forest_plot_dromedaries2$official_year1 <- fct_relevel(as.factor(forest_plot_dromedaries2$official_year1),  ">5 years before official case", "1-5 years before official case", "1-5 years after official case", ">5 years after official case")
+
+forest_plot_dromedaries2$group1 <- fct_relevel(forest_plot_dromedaries2$group1, "Dromedaries (Adults) (1-5 years before official case)", "Dromedaries (Adults) (1-5 years after official case)", "Dromedaries (Adults) (>5 years after official case)", "Dromedaries (Juveniles) (>5 years after official case)","Dromedaries (Age undefined) (>5 years before official case) ", "Dromedaries (Age undefined) (1-5 years before official case)", "Dromedaries (Age undefined) (1-5 years after official case)", "Dromedaries (Age undefined) (>5 years after official case)")
+## year subgroup analysis
+mt_prop_year <- metaprop(
+  event=samples_positive_sero,
+  n= sample_size_sero,
+  studlab=author1,
+  subgroup=group1,
+  data=forest_plot_dromedaries2,
+  byvar=official_year1,
+  pscale=100)
+
+
+
+png(file="figures/foresplot_dromedaries_year1.png", width=14, height=17, units="in", res=300)
+metafor::forest(mt_prop_year, rightlabs=c("Seroprevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size"), col.by = "black",smlab="", subgroup.name = "" )
+
+dev.off()
+
+
+#With country and age labels on the forest plot for PCR positives
+
+forest_plot_dromedaries_pcr <- data %>%
+  select(id, species, author, publication_year, study_end, sample_size_pcr, samples_positive_pcr, country, dromedaries_age) %>%
+  filter(species %in% "Dromedaries") %>%
+  separate(author, c("authname1", "authname2"), extra = "merge") %>%
+  mutate(authname2 = recode(authname2, "El" = "El-Kafraway"),
+         study_end1 = ifelse(is.na(study_end), "Not reported", study_end),
+         dromedaries_age = ifelse(is.na(dromedaries_age) | dromedaries_age == "", "age_undefined", dromedaries_age),
+         author1 = paste0(authname2, " et al, ", publication_year, " (", study_end1, ")", ", ", country, ", ", dromedaries_age)) %>%
+  filter(!is.na(sample_size_pcr)) %>%
+  filter(!is.na(samples_positive_pcr)) %>%
+  arrange(publication_year)
+
+mt_prop_pcr <- metaprop(
+  event = samples_positive_pcr, # Number of PCR positive samples
+  n = sample_size_pcr, # Total sample size for PCR
+  studlab = author1, # Use updated label for study
+  data = forest_plot_dromedaries_pcr, # Use the prepared dataset
+  pscale = 100 # Scale proportions to percentage
+)
+
+
+
+png(file="figures/foresplot_dromedaries_pcr_overall2.png", width=12, height=14, units="in", res=600)
+metafor::forest(mt_prop_pcr, rightlabs=c("PCR positivity (%)", "[95% CI]"),
+                leftlabs=c("Study (Year sample collected, Country, Age)", "Positive (n)", "Sample size"))
+
+dev.off()
+
+
+
+## subgroup analysis - PCR positives
+forest_plot_dromedaries4 <- data %>%
+  select(id, species,author,country, dromedaries_age, publication_year,study_end, sample_size_pcr, samples_positive_pcr) %>%
+  filter(species%in%"Dromedaries") %>%
+  mutate(group=ifelse(species%in%"Dromedaries" & dromedaries_age%in%c("Adults", "adults"),"Dromedaries (Adults)", ifelse(species%in%"Dromedaries" & dromedaries_age%in%"Juveniles", "Dromedaries (Juveniles)", ifelse(species%in%"Dromedaries" &is.na(dromedaries_age), "Dromedaries (Age undefined)", species)))) %>%
+  mutate(region=ifelse(country%in%c("Burkina Faso","Ghana", "Sierra Leone", "Mali", "Nigeria", "Senegal"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(study_end1=ifelse(is.na(study_end), "Not reported", study_end)) %>%
+   mutate(author1=paste0(authname2, " et al, ",publication_year, " (", study_end1, ")"))  %>%
+  filter(!is.na(sample_size_pcr)) %>%
+  filter(!is.na( samples_positive_pcr))%>%
+  mutate(official_year=study_end-2012) %>%
+  arrange(publication_year)
+
+forest_plot_dromedaries4$group <- fct_relevel(forest_plot_dromedaries4$group, "Dromedaries (Adults)", "Dromedaries (Juveniles)", "Dromedaries (Age undefined)")
+
+## region subgroup analysis
+mt_prop_region_PCR <- metaprop(
+  event=samples_positive_pcr,
+  n= sample_size_pcr,
+  studlab=author1,
+  subgroup=region,
+  data=forest_plot_dromedaries4,
+  pscale=100)
+
+
+png(file="figures/foresplot_dromedaries_region_PCR.png", width=14, height=14, units="in", res=300)
+metafor::forest(mt_prop_region_PCR, rightlabs=c("PCR prevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size"), col.by = "black",smlab="", subgroup.name = "" )
+dev.off()
+
+
+
+## subgroup analysis_ dromedaries PCR
+
+forest_plot_dromedaries_pcr_age <- data %>%
+  select(id, species,author,country, dromedaries_age, publication_year,study_end, sample_size_pcr, samples_positive_pcr) %>%
+  filter(species%in%"Dromedaries") %>%
+  mutate(group=ifelse(species%in%"Dromedaries" & dromedaries_age%in%c("Adults", "adults"),"Dromedaries (Adults)", ifelse(species%in%"Dromedaries" & dromedaries_age%in%"Juveniles", "Dromedaries (Juveniles)", ifelse(species%in%"Dromedaries" &is.na(dromedaries_age), "Dromedaries (Age undefined)", species)))) %>%
+  mutate(region=ifelse(country%in%c("Burkina Faso","Ghana", "Sierra Leone", "Mali", "Nigeria", "Senegal"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(study_end1=ifelse(is.na(study_end), "Not reported", study_end)) %>%
+  mutate(author1=paste0(authname2, " et al, ",publication_year, " (", study_end1, ")"))  %>%
+  filter(!is.na(sample_size_pcr)) %>%
+  filter(!is.na( samples_positive_pcr))%>%
+  mutate(official_year=study_end-2012) %>%
+  arrange(publication_year)
+
+forest_plot_dromedaries_pcr_age$group <- fct_relevel(forest_plot_dromedaries_pcr_age$group, "Dromedaries (Adults)", "Dromedaries (Juveniles)", "Dromedaries (Age undefined)")
+
+## age of dromedaries subgroup analysis - PCR positives
+mt_prop_pcr_age <- metaprop(
+  event=samples_positive_pcr,
+  n= sample_size_pcr,
+  studlab=author1,
+  subgroup=group,
+  data=forest_plot_dromedaries_pcr_age,
+  pscale=100)
+
+
+png(file="figures/foresplot_dromedaries_subgroup_pcr.png", width=14, height=14, units="in", res=300)
+metafor::forest(mt_prop_pcr_age, rightlabs=c("PCR positivity (%)", "[95% CI]"),
+                leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size"), col.by = "black",smlab="", subgroup.name = "" )
+
+dev.off()
+
+
+
+## humans foresplot - Seroprevalence 
+
+forest_plot_humans <- data %>%
+  select(id, species,author, publication_year,sample_size_sero,study_end, samples_positive_sero) %>%
+  filter(species%in%"Humans") %>%
+  separate(author, c("authname1", "authname2")) %>%
+  mutate(authname2=recode(authname2, "El"="El-Kafraway")) %>%
+  mutate(study_end1=ifelse(is.na(study_end), "Not reported", study_end)) %>%
+  mutate(author1=paste0(authname2, " et al, ",publication_year, " (", study_end1, ")"))  %>%
+  filter(!is.na(sample_size_sero)) %>%
+  filter(!is.na( samples_positive_sero))%>%
+  arrange(publication_year)
+
+mt_prop1 <- metaprop(
+  event=samples_positive_sero,
+  n= sample_size_sero,
+  studlab=author1,
+  data=forest_plot_humans,
+  pscale=100)
+
+
+png(file="figures/foresplot_humans_overall.png", width=14, height=12, units="in", res=300)
+metafor::forest(mt_prop1, rightlabs=c("Seroprevalence (%)", "[95% CI]"),
+                leftlabs=c("Study (Year data collected)", "Positive (n)", "Sample size") )
+
+png(file = "figures/funnel_plot_humans_overall.png", width = 14, height = 12, units = "in", res = 300)
+
+# Create the funnel plot with adjusted text sizes for publication readiness
+funnel(mt_prop1, 
+       xlab = "Proportion", 
+       main = "Funnel Plot of Seroprevalence in Humans",
+       cex.main = 1.5,  # Increase title size
+       cex.lab = 2.4,   # Increase axis labels size
+       cex.axis = 1.2   # Increase axis tick labels size
+)
+
+# Add text labels for each point using the author1 column, with larger text
+with(mt_prop1, text(mt_prop1$TE, mt_prop1$seTE, 
+                    labels = mt_prop1$studlab, 
+                    pos = 3,  # Position to the right of the points
+                    cex = 0.7  # Increase text size of the labels
+))
+
+
+dev.off()
+
+
+```
+
+```{r, meta_regresion}
+
+#Metaregression for dromedaries
+
+meta_reg_data <- data%>%
+  select(id, species, dromedaries_age, country, sample_size_sero, samples_positive_sero, setting_1, setting_2, setting_3) %>%
+  distinct()%>%
+  filter(species%in%"Dromedaries") %>%
+  filter(str_to_title(dromedaries_age)%in%c("Adults", "Juveniles")) %>%
+  pivot_longer(contains("setting"), names_to="Setting1", values_to="Setting") %>%
+  mutate(Setting=ifelse(Setting%in%c("Animal Markets","Slaughterhouses", "Slaughterhouse"), "Slaughter", "Non-slaughter")) %>%
+  mutate(group=ifelse(species%in%"Dromedaries" & dromedaries_age%in%c("Adults", "adults"),"Dromedaries (Adults)", ifelse(species%in%"Dromedaries" & dromedaries_age%in%"Juveniles", "Dromedaries (Juveniles)", ifelse(species%in%"Dromedaries" &is.na(dromedaries_age), "Dromedaries (Age undefined)", species)))) %>%
+  mutate(region=ifelse(country%in%c("Burkina Faso","Ghana", "Sierra Leone", "Mali", "Nigeria", "Senegal"), "West Africa",ifelse(country%in%c("Egypt", "Morocco", "Tunisia"), "North Africa", "East Africa"))) 
+
+meta_reg_data$dromedaries_age <- fct_relevel(meta_reg_data$dromedaries_age, "Juveniles", "Adults")
+meta_reg_data$region <- fct_relevel(meta_reg_data$region, "East Africa")
+meta_reg_data$Setting <- fct_relevel(meta_reg_data$Setting, "Non-slaughter","Slaughter")
+
+meta_reg_data1 <- escalc(measure="PR", ni=sample_size_sero,
+                         xi=samples_positive_sero, data=meta_reg_data)
+
+reg_model <- rma(yi = yi,
+                 vi = vi,
+                 data= meta_reg_data1,
+                 mods=~dromedaries_age+Setting)
+
+
+se <- c(0.4939,0.3090, -0.0295)
+ci_lb <-reg_model$ci.lb
+ci_ub <- reg_model$ci.ub
+
+reg_model1 <- data.frame(round(exp(se),3), round(exp(ci_lb),3), round(exp(ci_ub),3))
+
+names(reg_model1) <- c("Odds_Ratio", "ci_lb", "ci_ub")
+reg_model1$names <- c("Intercept", "Dromedaries: Adult", "Setting: Slaughter")
+
+
+## visualization
+ggplot(reg_model1[reg_model1$names!="Intercept",], aes(x=names, y=Odds_Ratio))+
+  geom_errorbar(aes(ymin=ci_lb, ymax=ci_ub))+geom_point(color="blue", size=3)+
+  coord_flip()+
+  theme_bw()+geom_hline(yintercept=1, linetype=2, color="red")+
+  labs(y="Odds ratios", x="")+
+  theme(text = element_text(size=12, face="bold")) +
+   theme(
+    axis.text.x = element_text(angle = 360, hjust = 1, size = 30),  # Increase x-axis text size and rotate for readability
+    axis.text.y = element_text(size = 30),  # Increase y-axis text size
+    axis.title.x = element_text(size = 30),  # Increase x-axis title size
+    axis.title.y = element_text(size = 30),  # Increase y-axis title size
+    legend.title = element_text(size = 19),  # Increase legend title size
+    legend.text = element_text(size = 17),  # Increase legend text size
+    plot.title = element_text(size = 30, face = "bold")  # Increase and bold the plot title
+  )
+  
+
+
+ggsave("odds_ratio_merscov.png", width = 20, height=8)
+```
+
