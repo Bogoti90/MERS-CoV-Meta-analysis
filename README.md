@@ -51,17 +51,18 @@ The analysis requires the following input files:
 
 ## Output Files
 The analysis generates several visualization outputs:
-- Distribution maps of studies
-- Temporal trends of publications
+- Number of studies Africa map
+- Temporal trends of MERS prevalance
 - Forest plots for meta-analysis
-- Funnel plots
-- Odds ratio visualizations
-
-## Citations and Data Sources
-[Add relevant citations and data sources]
+- Publication bias funnel plots
 
 ## License
-[Add your chosen license]
+This project is licensed under the CC0-1.0 license.
 
 ## Contact
-[Add your contact information]
+- **Brian M Ogoti**
+  - Global Health | Virologist.
+  - Contact: [brian.ogoti@cema.africa](mailto:brian.ogoti@cema.africa)
+  - Web: [The Center for Epidemiological Modelling and Analysis CEMA](https://cema-africa.uonbi.ac.ke/people/epidemiology/brian-maina)
+  - Twitter/X: [@diyobraz2](https://x.com/diyobraz2)
+---
