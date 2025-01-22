@@ -2,7 +2,7 @@
  MERS-CoV systematic review and Meta-analysis in Africa
 
 ## Overview
-This repository contains R code for analyzing MERS-CoV prevalence data in Africa, focusing on both dromedary camels and human cases. The analysis includes spatial distribution, temporal trends, and meta-analysis of seroprevalence data.
+This repository contains R code for analyzing MERS-CoV prevalence data in Africa, focusing on both dromedary camels and human cases. The analysis includes spatial distribution, temporal trends, and meta-analysis of the prevalence data.
 
 ## Prerequisites
 Required R packages:
