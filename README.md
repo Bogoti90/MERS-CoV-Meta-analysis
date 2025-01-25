@@ -32,7 +32,7 @@ The analysis requires the following input files:
 │   └── MERS-Review Extraction tool_2024.xlsx
 ├── figures/
 ├── R/
-│   └── analysis.Rmd
+│   └── MERS_review.Rmd
 └── README.md
 ```
 
